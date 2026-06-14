@@ -430,32 +430,7 @@ export default function XfyunVoiceInput({ onTranscriptChange, onFinalResult, tra
         </div>
       )}
       
-      {/* 备用手动输入 */}
-      <div className="mt-4 p-3 bg-macaron-blue-light/30 border border-macaron-blue/20 rounded-xl">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={manualInput}
-            onChange={(e) => setManualInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleManualSubmit()}
-            placeholder="或直接输入绘图描述..."
-            className="flex-1 px-4 py-2 border border-border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sakura focus:border-transparent transition-all"
-          />
-          <button
-            onClick={handleManualSubmit}
-            disabled={!manualInput.trim()}
-            className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
-              manualInput.trim()
-                ? "bg-mint hover:bg-mint/90 text-white"
-                : "bg-text-disabled text-white cursor-not-allowed"
-            }`}
-            aria-label="使用文本"
-          >
-            <Send className="w-4 h-4" />
-            发送
-          </button>
-        </div>
-      </div>
+    
     </div>
   );
 }

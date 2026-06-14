@@ -16,6 +16,7 @@ import type { MicButtonState } from "../components/MicButton";
 import Toast, { ToastType } from "../components/Toast";
 import XfyunVoiceInput from "../components/XfyunVoiceInput";
 import { authDB, User as UserType } from "../lib/db";
+import type { DrawInstruction } from "../lib/draw-schema";
 
 interface ToastData {
   id: string;
@@ -30,12 +31,14 @@ export default function CanvasPage() {
   const [transcript, setTranscript] = useState("");
   const [sessionDescription, setSessionDescription] = useState("");
   const [toasts, setToasts] = useState<ToastData[]>([]);
+  const [isDrawing, setIsDrawing] = useState(false);
 
   const headerRef = useRef<HTMLElement>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const voiceAreaRef = useRef<HTMLDivElement>(null);
   const descriptionRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // 检查用户登录状态
   useEffect(() => {
@@ -150,6 +153,132 @@ export default function CanvasPage() {
     addToast("success", "识别结果已填入会话描述");
   }, [addToast]);
 
+  // 绘制图形到 Canvas
+  const drawShapes = useCallback((instructions: DrawInstruction) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // 设置 Canvas 尺寸
+    canvas.width = 800;
+    canvas.height = 600;
+
+    // 绘制背景
+    if (instructions.backgroundColor) {
+      ctx.fillStyle = instructions.backgroundColor;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } else {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // 绘制每个图形
+    instructions.shapes.forEach((shape) => {
+      ctx.beginPath();
+
+      switch (shape.type) {
+        case "rectangle":
+          if (shape.fillColor) {
+            ctx.fillStyle = shape.fillColor;
+            ctx.fillRect(shape.x, shape.y, shape.width || 100, shape.height || 100);
+          }
+          if (shape.strokeColor) {
+            ctx.strokeStyle = shape.strokeColor;
+            ctx.lineWidth = shape.strokeWidth || 2;
+            ctx.strokeRect(shape.x, shape.y, shape.width || 100, shape.height || 100);
+          }
+          break;
+
+        case "circle":
+          ctx.arc(shape.x, shape.y, shape.radius || 50, 0, Math.PI * 2);
+          if (shape.fillColor) {
+            ctx.fillStyle = shape.fillColor;
+            ctx.fill();
+          }
+          if (shape.strokeColor) {
+            ctx.strokeStyle = shape.strokeColor;
+            ctx.lineWidth = shape.strokeWidth || 2;
+            ctx.stroke();
+          }
+          break;
+
+        case "line":
+          ctx.moveTo(shape.x, shape.y);
+          ctx.lineTo(shape.x2 || shape.x + 100, shape.y2 || shape.y);
+          ctx.strokeStyle = shape.strokeColor || "#000";
+          ctx.lineWidth = shape.strokeWidth || 2;
+          ctx.stroke();
+          break;
+
+        case "triangle":
+          const baseX = shape.x;
+          const baseY = shape.y;
+          const triWidth = shape.width || 100;
+          const triHeight = shape.height || 100;
+          ctx.moveTo(baseX, baseY);
+          ctx.lineTo(baseX + triWidth / 2, baseY - triHeight);
+          ctx.lineTo(baseX + triWidth, baseY);
+          ctx.closePath();
+          if (shape.fillColor) {
+            ctx.fillStyle = shape.fillColor;
+            ctx.fill();
+          }
+          if (shape.strokeColor) {
+            ctx.strokeStyle = shape.strokeColor;
+            ctx.lineWidth = shape.strokeWidth || 2;
+            ctx.stroke();
+          }
+          break;
+
+        case "text":
+          ctx.font = "20px PingFang SC, Microsoft YaHei, sans-serif";
+          ctx.fillStyle = shape.fillColor || "#000";
+          ctx.fillText(shape.text || "", shape.x, shape.y);
+          break;
+      }
+    });
+
+    // 添加绘制完成动画
+    gsap.fromTo(
+      canvas,
+      { scale: 0.95, opacity: 0 },
+      { scale: 1, opacity: 1, duration: 0.5, ease: "back.out(1.4)" }
+    );
+  }, []);
+
+  // 处理开始绘图
+  const handleStartDrawing = useCallback(async () => {
+    if (!sessionDescription.trim()) {
+      addToast("warning", "请先输入绘图描述");
+      return;
+    }
+
+    setIsDrawing(true);
+    addToast("info", "正在生成绘图...");
+
+    try {
+      const response = await fetch("/api/draw", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: sessionDescription }),
+      });
+
+      if (!response.ok) {
+        throw new Error("绘图生成失败");
+      }
+
+      const instructions: DrawInstruction = await response.json();
+      drawShapes(instructions);
+      addToast("success", "绘图完成");
+    } catch (error) {
+      console.error("Draw error:", error);
+      addToast("error", "绘图失败，请重试");
+    } finally {
+      setIsDrawing(false);
+    }
+  }, [sessionDescription, drawShapes, addToast]);
+
   if (!user) {
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center">
@@ -235,6 +364,7 @@ export default function CanvasPage() {
 
             {/* Canvas */}
             <canvas
+              ref={canvasRef}
               className="w-full h-full relative z-10"
               role="img"
               aria-label="绘图画布 - 通过语音指令控制绘图"
@@ -337,23 +467,17 @@ export default function CanvasPage() {
               {/* 绘图 Agent 按钮 */}
               <div className="mt-3 flex justify-end">
                 <button
-                  onClick={() => {
-                    if (sessionDescription.trim()) {
-                      addToast("info", "正在进入绘图 Agent...");
-                    } else {
-                      addToast("warning", "请先输入绘图描述");
-                    }
-                  }}
-                  disabled={!sessionDescription.trim()}
+                  onClick={handleStartDrawing}
+                  disabled={!sessionDescription.trim() || isDrawing}
                   className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all ${
-                    sessionDescription.trim()
+                    sessionDescription.trim() && !isDrawing
                       ? "bg-lavender hover:bg-lavender/90 text-white shadow-sm"
                       : "bg-text-disabled text-white cursor-not-allowed"
                   }`}
-                  aria-label="进入绘图 Agent"
+                  aria-label="开始绘图"
                 >
-                  <Sparkles className="w-4 h-4" />
-                  开始绘图
+                  <Sparkles className={`w-4 h-4 ${isDrawing ? "animate-spin" : ""}`} />
+                  {isDrawing ? "绘制中..." : "开始绘图"}
                 </button>
               </div>
             </div>
