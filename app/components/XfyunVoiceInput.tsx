@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Mic, MicOff, AlertCircle, Send, X } from "lucide-react";
 import gsap from "gsap";
 
 interface VoiceInputProps {
   onTranscriptChange: (transcript: string) => void;
+  onFinalResult?: (transcript: string) => void;
   transcript: string;
 }
 
@@ -63,7 +64,7 @@ interface XfyunResult {
   sid?: string;
 }
 
-export default function XfyunVoiceInput({ onTranscriptChange, transcript }: VoiceInputProps) {
+export default function XfyunVoiceInput({ onTranscriptChange, onFinalResult, transcript }: VoiceInputProps) {
   const [isListening, setIsListening] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [manualInput, setManualInput] = useState("");
@@ -72,10 +73,22 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const isStopRef = useRef(false);
+  const latestTextRef = useRef("");
+  const hasFinalizedRef = useRef(false);
+  const onFinalResultRef = useRef(onFinalResult);
+
+  useEffect(() => {
+    onFinalResultRef.current = onFinalResult;
+  }, [onFinalResult]);
 
   const handleStop = useCallback(() => {
     setIsListening(false);
     isStopRef.current = true;
+
+    if (!hasFinalizedRef.current && onFinalResultRef.current && latestTextRef.current.trim()) {
+      hasFinalizedRef.current = true;
+      onFinalResultRef.current(latestTextRef.current.trim());
+    }
     
     if (wsRef.current) {
       try {
@@ -132,6 +145,8 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
     setRuntimeError(null);
     setPartialResult("");
     isStopRef.current = false;
+    hasFinalizedRef.current = false;
+    latestTextRef.current = "";
 
     try {
       console.log("正在请求麦克风权限...");
@@ -258,6 +273,8 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
             return;
           }
           
+          let currentFrameText = "";
+
           if (result.payload?.result?.text) {
             try {
               const base64Text = result.payload.result.text;
@@ -284,6 +301,8 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
                 });
                 
                 console.log("识别结果:", frameText);
+                currentFrameText = frameText;
+                latestTextRef.current = frameText;
                 setPartialResult(frameText);
                 onTranscriptChange(frameText);
               }
@@ -292,20 +311,26 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
             }
           }
           
-          const headerStatus = result.header?.status;
-          const resultStatus = result.payload?.result?.status;
-          if (headerStatus === 2 || resultStatus === 2) {
-            console.log("收到最后一帧，停止识别");
-            handleStop();
-          }
-          
           if (result.action === "result" && result.data?.result?.ws) {
             const wsData = result.data.result.ws;
             if (wsData && wsData.length > 0) {
               const text = wsData.map((item: XfyunWs) => item.onebest || "").join("");
+              currentFrameText = text;
+              latestTextRef.current = text;
               setPartialResult(text);
               onTranscriptChange(text);
             }
+          }
+          
+          const headerStatus = result.header?.status;
+          const resultStatus = result.payload?.result?.status;
+          if (headerStatus === 2 || resultStatus === 2) {
+            console.log("收到最后一帧，停止识别");
+            if (!hasFinalizedRef.current && onFinalResultRef.current && currentFrameText.trim()) {
+              hasFinalizedRef.current = true;
+              onFinalResultRef.current(currentFrameText.trim());
+            }
+            handleStop();
           }
         } catch (e) {
           console.error("解析讯飞响应失败:", e);

@@ -21,6 +21,7 @@ export default function CanvasPage() {
   const [user, setUser] = useState<UserType | null>(null);
   const [micState, setMicState] = useState<MicButtonState>("idle");
   const [transcript, setTranscript] = useState("");
+  const [transcriptHistory, setTranscriptHistory] = useState<string[]>([]);
   const [toasts, setToasts] = useState<ToastData[]>([]);
 
   const headerRef = useRef<HTMLElement>(null);
@@ -131,12 +132,22 @@ export default function CanvasPage() {
     }
   }, [micState, addToast]);
 
-  // 当转录内容变化时显示Toast
-  useEffect(() => {
-    if (transcript && micState === "idle") {
-      addToast("success", `已识别: ${transcript}`);
-    }
-  }, [transcript, micState, addToast]);
+  // 处理语音识别最终结果
+  const handleFinalResult = useCallback((finalTranscript: string) => {
+    const trimmed = finalTranscript.trim();
+    if (!trimmed) return;
+
+    setTranscriptHistory((prev) => {
+      if (prev.length > 0 && prev[prev.length - 1] === trimmed) {
+        return prev;
+      }
+      return [...prev, trimmed];
+    });
+
+    setTranscript("");
+    setMicState("idle");
+    addToast("success", "语音识别完成");
+  }, [addToast]);
 
   if (!user) {
     return (
@@ -287,7 +298,7 @@ export default function CanvasPage() {
               <p className="text-xs text-text-secondary">
                 试试说：
                 <span className="text-sakura font-medium ml-1">
-                  "画一个红色圆形"
+                  &quot;画一个红色圆形&quot;
                 </span>
               </p>
             </div>
@@ -298,6 +309,7 @@ export default function CanvasPage() {
         <div ref={transcriptRef}>
           <TranscriptBar
             transcript={transcript}
+            history={transcriptHistory}
             isRecording={micState === "recording"}
           />
         </div>
@@ -329,6 +341,7 @@ export default function CanvasPage() {
           {/* 语音输入组件 */}
           <XfyunVoiceInput
             onTranscriptChange={handleTranscriptChange}
+            onFinalResult={handleFinalResult}
             transcript={transcript}
           />
         </div>

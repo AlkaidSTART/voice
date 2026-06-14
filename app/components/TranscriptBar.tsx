@@ -8,11 +8,13 @@ gsap.registerPlugin(TextPlugin);
 
 interface TranscriptBarProps {
   transcript: string;
+  history?: string[];
   isRecording?: boolean;
 }
 
 export default function TranscriptBar({
   transcript,
+  history = [],
   isRecording = false,
 }: TranscriptBarProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -95,11 +97,31 @@ export default function TranscriptBar({
     });
   };
 
+  const hasHistory = history.length > 0;
+
   return (
     <div
       ref={containerRef}
-      className="h-14 bg-surface/95 backdrop-blur-sm border-t border-border flex items-center px-6 overflow-hidden"
+      className={`bg-surface/95 backdrop-blur-sm border-t border-border px-6 overflow-hidden ${
+        hasHistory
+          ? "min-h-[56px] max-h-[140px] py-2 overflow-y-auto"
+          : "h-14 flex items-center"
+      }`}
     >
+      {/* 历史记录 */}
+      {hasHistory && (
+        <div className="flex flex-wrap gap-2 mb-2">
+          {history.map((item, index) => (
+            <div
+              key={index}
+              className="px-3 py-1 bg-macaron-blue-light/40 rounded-full text-xs text-text-primary border border-macaron-blue/20"
+            >
+              {item}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex-1 flex items-center gap-3 min-w-0">
         {/* 录音状态指示器 */}
         <div className="relative flex-shrink-0">
