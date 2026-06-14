@@ -1,164 +1,85 @@
-"use client";
+'use client';
 
-import { useState, useCallback, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
-  User,
   Image,
   LogOut,
+  User,
   RotateCcw,
   RotateCw,
-  Trash2,
-  Sparkles,
-  Download,
-  Save,
   FilePlus,
-} from "lucide-react";
-import gsap from "gsap";
-import type { MicButtonState } from "../components/MicButton";
-import Toast, { ToastType } from "../components/Toast";
-import XfyunVoiceInput from "../components/XfyunVoiceInput";
-import SaveModal from "../components/SaveModal";
-import { authDB, artworkDB, User as UserType } from "../lib/db";
-import type { DrawInstruction } from "../lib/draw-schema";
-
-interface ToastData {
-  id: string;
-  type: ToastType;
-  message: string;
-}
+  Trash2,
+  Save,
+  Download,
+  Sparkles,
+} from 'lucide-react';
+import { gsap } from 'gsap';
+import { useRouter } from 'next/navigation';
+import { authDB, artworkDB } from '../lib/db';
+import type { User as UserType } from '../lib/db';
+import { DrawInstruction } from '../lib/draw-schema';
+import XfyunVoiceInput from '../components/XfyunVoiceInput';
+import SaveModal from '../components/SaveModal';
+import Toast from '../components/Toast';
 
 export default function CanvasPage() {
   const router = useRouter();
-  const [user, setUser] = useState<UserType | null>(null);
-  const [micState, setMicState] = useState<MicButtonState>("idle");
-  const [transcript, setTranscript] = useState("");
-  const [sessionDescription, setSessionDescription] = useState("");
-  const [toasts, setToasts] = useState<ToastData[]>([]);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [saveModalOpen, setSaveModalOpen] = useState(false);
-  const [saveTitle, setSaveTitle] = useState("");
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [currentArtworkId, setCurrentArtworkId] = useState<string | null>(null);
 
-  const headerRef = useRef<HTMLElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const voiceAreaRef = useRef<HTMLDivElement>(null);
   const descriptionRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const voiceAreaRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
 
-  // 检查用户登录状态
+  const [sessionDescription, setSessionDescription] = useState('');
+  const [transcript, setTranscript] = useState('');
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveTitle, setSaveTitle] = useState('');
+  const [currentArtworkId, setCurrentArtworkId] = useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [micState, setMicState] = useState<'idle' | 'recording' | 'processing'>('idle');
+  const [user, setUser] = useState<UserType | null>(null);
+
+  const [toasts, setToasts] = useState<{ id: string; type: 'success' | 'error' | 'warning' | 'info'; message: string }[]>([]);
+
+  // 加载用户信息
   useEffect(() => {
-    const checkAuth = async () => {
+    const loadUser = async () => {
       const currentUser = await authDB.getCurrentUser();
-      if (!currentUser) {
-        router.push("/login");
-      } else {
-        setUser(currentUser);
-      }
+      setUser(currentUser);
     };
-    checkAuth();
-  }, [router]);
-
-  // 页面入场动画
-  useEffect(() => {
-    if (!user) return;
-
-    const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
-
-    tl.fromTo(
-      headerRef.current,
-      { y: -20, opacity: 0 },
-      { y: 0, opacity: 1, duration: 0.5 }
-    )
-      .fromTo(
-        canvasAreaRef.current,
-        { scale: 0.95, opacity: 0 },
-        { scale: 1, opacity: 1, duration: 0.6, ease: "back.out(1.2)" },
-        "-=0.3"
-      )
-      .fromTo(
-        toolbarRef.current,
-        { y: 20, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.4 },
-        "-=0.3"
-      )
-      .fromTo(
-        descriptionRef.current,
-        { y: 10, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.3 },
-        "-=0.2"
-      )
-      .fromTo(
-        voiceAreaRef.current,
-        { y: 20, opacity: 0 },
-        { y: 0, opacity: 1, duration: 0.4, ease: "back.out(1.5)" },
-        "-=0.15"
-      );
-
-    return () => {
-      tl.kill();
-    };
-  }, [user]);
-
-  // 添加Toast通知
-  const addToast = useCallback((type: ToastType, message: string) => {
-    const id = `toast_${Date.now()}`;
-    setToasts((prev) => [...prev, { id, type, message }]);
+    loadUser();
   }, []);
 
-  // 移除Toast通知
+  const addToast = useCallback((type: 'success' | 'error' | 'warning' | 'info', message: string) => {
+    const id = Date.now().toString();
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3000);
+  }, []);
+
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // 处理麦克风按钮点击 - 切换录音状态
-  const handleMicClick = useCallback(() => {
-    switch (micState) {
-      case "idle":
-        setMicState("recording");
-        addToast("info", "开始录音...");
-        break;
-      case "recording":
-        setMicState("processing");
-        addToast("info", "识别中...");
-        break;
-      case "error":
-        setMicState("idle");
-        break;
-      case "processing":
-        // 处理中不允许点击
-        break;
-    }
-  }, [micState, addToast]);
-
-  // 处理登出
   const handleLogout = useCallback(async () => {
     await authDB.logout();
-    router.push("/login");
+    router.push('/login');
   }, [router]);
 
-  // 处理语音识别结果
   const handleTranscriptChange = useCallback((newTranscript: string) => {
     setTranscript(newTranscript);
-    if (newTranscript && micState === "processing") {
-      setTimeout(() => {
-        setMicState("idle");
-        addToast("success", "语音识别完成");
-      }, 500);
-    }
-  }, [micState, addToast]);
+  }, []);
 
-  // 处理语音识别最终结果
   const handleFinalResult = useCallback((finalTranscript: string) => {
-    const trimmed = finalTranscript.trim();
-    if (!trimmed) return;
-
-    setTranscript(trimmed);
-    setSessionDescription(trimmed);
-    setMicState("idle");
-    addToast("success", "识别结果已填入会话描述");
+    if (finalTranscript.trim()) {
+      setSessionDescription(finalTranscript);
+      setMicState('idle');
+      addToast('success', '识别结果已填入绘图描述');
+    }
   }, [addToast]);
 
   // 绘制图形到 Canvas
@@ -166,7 +87,7 @@ export default function CanvasPage() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     // 设置固定 Canvas 尺寸
@@ -180,7 +101,7 @@ export default function CanvasPage() {
       ctx.fillStyle = instructions.backgroundColor;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     } else {
-      ctx.fillStyle = "#FFFFFF";
+      ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
@@ -189,7 +110,7 @@ export default function CanvasPage() {
       ctx.beginPath();
 
       switch (shape.type) {
-        case "rectangle":
+        case 'rectangle':
           if (shape.fillColor) {
             ctx.fillStyle = shape.fillColor;
             ctx.fillRect(shape.x, shape.y, shape.width || 100, shape.height || 100);
@@ -201,7 +122,7 @@ export default function CanvasPage() {
           }
           break;
 
-        case "circle":
+        case 'circle':
           ctx.arc(shape.x, shape.y, shape.radius || 50, 0, Math.PI * 2);
           if (shape.fillColor) {
             ctx.fillStyle = shape.fillColor;
@@ -214,15 +135,15 @@ export default function CanvasPage() {
           }
           break;
 
-        case "line":
+        case 'line':
           ctx.moveTo(shape.x, shape.y);
           ctx.lineTo(shape.x2 || shape.x + 100, shape.y2 || shape.y);
-          ctx.strokeStyle = shape.strokeColor || "#000";
+          ctx.strokeStyle = shape.strokeColor || '#000';
           ctx.lineWidth = shape.strokeWidth || 2;
           ctx.stroke();
           break;
 
-        case "triangle":
+        case 'triangle':
           const baseX = shape.x;
           const baseY = shape.y;
           const triWidth = shape.width || 100;
@@ -242,10 +163,10 @@ export default function CanvasPage() {
           }
           break;
 
-        case "text":
-          ctx.font = "20px PingFang SC, Microsoft YaHei, sans-serif";
-          ctx.fillStyle = shape.fillColor || "#000";
-          ctx.fillText(shape.text || "", shape.x, shape.y);
+        case 'text':
+          ctx.font = '20px PingFang SC, Microsoft YaHei, sans-serif';
+          ctx.fillStyle = shape.fillColor || '#000';
+          ctx.fillText(shape.text || '', shape.x, shape.y);
           break;
       }
     });
@@ -254,7 +175,7 @@ export default function CanvasPage() {
     gsap.fromTo(
       canvas,
       { scale: 0.95, opacity: 0 },
-      { scale: 1, opacity: 1, duration: 0.5, ease: "back.out(1.4)" }
+      { scale: 1, opacity: 1, duration: 0.5, ease: 'back.out(1.4)' }
     );
   }, []);
 
@@ -263,7 +184,7 @@ export default function CanvasPage() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     // 设置固定尺寸
@@ -273,29 +194,26 @@ export default function CanvasPage() {
     canvas.height = fixedHeight;
 
     // 初始化白色背景
-    ctx.fillStyle = "#FFFFFF";
+    ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }, []);
 
   // 保存到图库（带命名）
   const handleSaveClick = useCallback(() => {
-    // 设置默认标题为会话描述的前30个字符
-    const defaultTitle = sessionDescription.substring(0, 30) + 
-      (sessionDescription.length > 30 ? "..." : "") || "未命名作品";
+    const defaultTitle = sessionDescription.substring(0, 30) || '未命名作品';
     setSaveTitle(defaultTitle);
     setSaveModalOpen(true);
   }, [sessionDescription]);
 
-  // 实际保存操作
   const handleSaveConfirm = useCallback(async (title: string) => {
     const canvas = canvasRef.current;
     if (!canvas) {
-      addToast("error", "无法获取画布内容");
+      addToast('error', '无法获取画布内容');
       return;
     }
 
     try {
-      const thumbnail = canvas.toDataURL("image/png");
+      const thumbnail = canvas.toDataURL('image/png');
       const canvasData = JSON.stringify({
         width: canvas.width,
         height: canvas.height,
@@ -304,48 +222,44 @@ export default function CanvasPage() {
       });
 
       if (currentArtworkId) {
-        // 更新现有作品
         await artworkDB.update(currentArtworkId, {
           title,
           thumbnail,
           canvasData,
         });
-        addToast("success", "作品已更新");
       } else {
-        // 保存新作品
-        const artwork = await artworkDB.save({
-          userId: user?.id || "guest",
+        await artworkDB.save({
+          userId: user?.id || 'guest',
           title,
           thumbnail,
           canvasData,
         });
-        setCurrentArtworkId(artwork.id);
-        addToast("success", "作品已保存到图库");
       }
-      setHasUnsavedChanges(false);
-    } catch (error) {
-      console.error("保存到图库失败:", error);
-      addToast("error", "保存到图库失败");
-    }
-  }, [canvasRef, sessionDescription, user, currentArtworkId, addToast]);
 
-  // 新建绘图（自动保存当前作品）
+      setSaveModalOpen(false);
+      setHasUnsavedChanges(false);
+      addToast('success', '作品已保存到图库');
+    } catch (error) {
+      console.error('保存失败:', error);
+      addToast('error', '保存失败，请重试');
+    }
+  }, [canvasRef, sessionDescription, currentArtworkId, user, addToast]);
+
+  // 新建画布（自动保存当前作品）
   const handleNewCanvas = useCallback(async () => {
     // 如果有未保存的更改，先自动保存
     if (hasUnsavedChanges) {
       const canvas = canvasRef.current;
       if (canvas) {
         try {
-          const thumbnail = canvas.toDataURL("image/png");
+          const thumbnail = canvas.toDataURL('image/png');
           const canvasData = JSON.stringify({
             width: canvas.width,
             height: canvas.height,
             description: sessionDescription,
             timestamp: Date.now(),
           });
-
-          const defaultTitle = sessionDescription.substring(0, 30) + 
-            (sessionDescription.length > 30 ? "..." : "") || "未命名作品";
+          const defaultTitle = sessionDescription.substring(0, 30) || '未命名作品';
 
           if (currentArtworkId) {
             await artworkDB.update(currentArtworkId, {
@@ -355,15 +269,15 @@ export default function CanvasPage() {
             });
           } else {
             await artworkDB.save({
-              userId: user?.id || "guest",
+              userId: user?.id || 'guest',
               title: defaultTitle,
               thumbnail,
               canvasData,
             });
           }
-          addToast("info", "当前作品已自动保存");
+          addToast('info', '当前作品已自动保存');
         } catch (error) {
-          console.error("自动保存失败:", error);
+          console.error('自动保存失败:', error);
         }
       }
     }
@@ -371,39 +285,39 @@ export default function CanvasPage() {
     // 清空画布和状态
     const canvas = canvasRef.current;
     if (canvas) {
-      const ctx = canvas.getContext("2d");
+      const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "#FFFFFF";
+        ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
     }
 
-    setSessionDescription("");
-    setTranscript("");
+    setSessionDescription('');
+    setTranscript('');
     setCurrentArtworkId(null);
     setHasUnsavedChanges(false);
-    addToast("success", "已创建新画布");
+    addToast('success', '已创建新画布');
   }, [hasUnsavedChanges, canvasRef, sessionDescription, currentArtworkId, user, addToast]);
 
   // 导出 PNG
   const exportPNG = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) {
-      addToast("error", "无法获取画布内容");
+      addToast('error', '无法获取画布内容');
       return;
     }
 
     try {
-      const link = document.createElement("a");
-      const title = sessionDescription.substring(0, 30) || "drawing";
+      const link = document.createElement('a');
+      const title = sessionDescription.substring(0, 30) || 'drawing';
       link.download = `${title}.png`;
-      link.href = canvas.toDataURL("image/png");
+      link.href = canvas.toDataURL('image/png');
       link.click();
-      addToast("success", "图片已导出");
+      addToast('success', '图片已导出');
     } catch (error) {
-      console.error("导出 PNG 失败:", error);
-      addToast("error", "导出失败");
+      console.error('导出 PNG 失败:', error);
+      addToast('error', '导出失败');
     }
   }, [canvasRef, sessionDescription, addToast]);
 
@@ -412,50 +326,50 @@ export default function CanvasPage() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#FFFFFF";
+    ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
     setHasUnsavedChanges(true);
-    addToast("success", "画布已清空");
+    addToast('success', '画布已清空');
   }, [canvasRef, addToast]);
 
   // 打开图库
   const openGallery = useCallback(() => {
-    router.push("/gallery");
+    router.push('/gallery');
   }, [router]);
 
   // 处理开始绘图
   const handleStartDrawing = useCallback(async () => {
     if (!sessionDescription.trim()) {
-      addToast("warning", "请先输入绘图描述");
+      addToast('warning', '请先输入绘图描述');
       return;
     }
 
     setIsDrawing(true);
-    addToast("info", "正在生成绘图...");
+    addToast('info', '正在生成绘图...');
 
     try {
-      const response = await fetch("/api/draw", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const response = await fetch('/api/draw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: sessionDescription }),
       });
 
       if (!response.ok) {
-        throw new Error("绘图生成失败");
+        throw new Error('绘图生成失败');
       }
 
       const instructions: DrawInstruction = await response.json();
       drawShapes(instructions);
       setHasUnsavedChanges(true);
-      addToast("success", "绘图完成，记得保存作品");
+      addToast('success', '绘图完成，记得保存作品');
     } catch (error) {
-      console.error("Draw error:", error);
-      addToast("error", "绘图失败，请重试");
+      console.error('Draw error:', error);
+      addToast('error', '绘图失败，请重试');
     } finally {
       setIsDrawing(false);
     }
@@ -528,185 +442,187 @@ export default function CanvasPage() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col items-center justify-center overflow-auto p-4">
-        {/* Canvas Area */}
-        <div
-          ref={canvasAreaRef}
-          className="relative bg-gradient-to-br from-white to-sakura-light/10 rounded-3xl border border-sakura/15 shadow-xl shadow-sakura/8 overflow-hidden"
-          style={{ width: '800px', height: '600px' }}
-        >
-          {/* 背景装饰网格 */}
+        {/* Canvas Area with Sidebar */}
+        <div className="flex gap-4 items-start">
+          {/* Canvas Container */}
           <div
-            className="absolute inset-0 opacity-20"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle, #FFB7C5 0.5px, transparent 0.5px)",
-              backgroundSize: "32px 32px",
-            }}
-          />
-
-          {/* Canvas */}
-          <canvas
-            ref={canvasRef}
-            className="absolute inset-0"
-            style={{ width: '100%', height: '100%' }}
-            role="img"
-            aria-label="绘图画布 - 通过语音指令控制绘图"
-          />
-
-            {/* Toolbar */}
+            ref={canvasAreaRef}
+            className="relative bg-gradient-to-br from-white to-sakura-light/10 rounded-3xl border border-sakura/15 shadow-xl shadow-sakura/8 overflow-hidden"
+            style={{ width: '800px', height: '600px' }}
+          >
+            {/* 背景装饰网格 */}
             <div
-              ref={toolbarRef}
-              className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-surface/95 backdrop-blur-sm rounded-2xl border border-sakura/10 shadow-lg px-4 py-2"
-            >
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => addToast("info", "撤销功能开发中")}
-                  className="p-2 rounded-xl text-text-secondary hover:text-text-primary hover:bg-sakura-light/20 transition-all"
-                  aria-label="撤销"
-                  title="撤销"
-                >
-                  <RotateCcw className="w-5 h-5" />
-                </button>
+              className="absolute inset-0 opacity-20"
+              style={{
+                backgroundImage:
+                  'radial-gradient(circle, #FFB7C5 0.5px, transparent 0.5px)',
+                backgroundSize: '32px 32px',
+              }}
+            />
 
-                <button
-                  onClick={() => addToast("info", "重做功能开发中")}
-                  className="p-2 rounded-xl text-text-secondary hover:text-text-primary hover:bg-sakura-light/20 transition-all"
-                  aria-label="重做"
-                  title="重做"
-                >
-                  <RotateCw className="w-5 h-5" />
-                </button>
-
-                <div className="w-px h-6 bg-border" />
-
-                {/* 新建画布 */}
-                <button
-                  onClick={handleNewCanvas}
-                  className="p-2 rounded-xl text-text-secondary hover:text-lavender hover:bg-lavender-light/20 transition-all"
-                  aria-label="新建画布"
-                  title="新建画布"
-                >
-                  <FilePlus className="w-5 h-5" />
-                </button>
-
-                <button
-                  onClick={clearCanvas}
-                  className="p-2 rounded-xl text-text-secondary hover:text-error hover:bg-error/10 transition-all"
-                  aria-label="清空画布"
-                  title="清空画布"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
-
-                <div className="w-px h-6 bg-border" />
-
-                {/* 保存到图库 */}
-                <button
-                  onClick={handleSaveClick}
-                  className="p-2 rounded-xl text-text-secondary hover:text-mint hover:bg-mint-light/20 transition-all"
-                  aria-label="保存到图库"
-                  title="保存到图库"
-                >
-                  <Save className="w-5 h-5" />
-                </button>
-
-                {/* 导出 PNG */}
-                <button
-                  onClick={exportPNG}
-                  className="p-2 rounded-xl text-text-secondary hover:text-macaron-blue hover:bg-macaron-blue-light/20 transition-all"
-                  aria-label="导出 PNG"
-                  title="导出 PNG"
-                >
-                  <Download className="w-5 h-5" />
-                </button>
-
-                <div className="w-px h-6 bg-border" />
-
-                {/* 当前颜色指示 */}
-                <div className="flex items-center gap-2 px-2">
-                  <div className="w-4 h-4 rounded-full bg-sakura border-2 border-white shadow-sm" />
-                  <span className="text-xs text-text-secondary font-medium">
-                    樱花粉
-                  </span>
-                </div>
-
-                <div className="w-px h-6 bg-border" />
-
-                {/* 模式标签 */}
-                <div className="px-3 py-1.5 rounded-full bg-sakura-light text-sakura text-xs font-semibold">
-                  绘图模式
-                </div>
-              </div>
-            </div>
+            {/* Canvas */}
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0"
+              style={{ width: '100%', height: '100%' }}
+              role="img"
+              aria-label="绘图画布 - 通过语音指令控制绘图"
+            />
 
             {/* 右上角装饰 - 操作提示 */}
             <div className="absolute top-4 right-4 bg-white/80 backdrop-blur-sm rounded-xl border border-sakura/10 shadow-sm px-4 py-2">
               <p className="text-xs text-text-secondary">
                 试试说：
                 <span className="text-sakura font-medium ml-1">
-                  &quot;画一个红色圆形&quot;
+                  "画一个红色圆形&quot;
                 </span>
               </p>
             </div>
           </div>
 
-          {/* Description Area - 缩小高度 */}
+          {/* Sidebar Toolbar */}
           <div
-            ref={descriptionRef}
-            className="w-full max-w-3xl mt-4"
+            ref={toolbarRef}
+            className="bg-surface/95 backdrop-blur-sm rounded-2xl border border-sakura/10 shadow-lg p-3 flex flex-col gap-1"
           >
-            <section className="rounded-3xl border border-sakura/10 bg-white/90 shadow-sm shadow-sakura/5">
-              <div className="flex items-center gap-2 px-5 pt-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-lavender/20 text-lavender">
-                  <Sparkles className="h-4 w-4" />
-                </div>
-                <h2 className="text-sm font-semibold text-text-primary">
-                  绘图描述
-                </h2>
-              </div>
+            {/* 撤销 */}
+            <button
+              onClick={() => addToast('info', '撤销功能开发中')}
+              className="p-3 rounded-xl text-text-secondary hover:text-text-primary hover:bg-sakura-light/20 transition-all"
+              aria-label="撤销"
+              title="撤销"
+            >
+              <RotateCcw className="w-5 h-5" />
+            </button>
 
-              <div className="p-4 pt-2">
-                <textarea
-                  value={sessionDescription}
-                  onChange={(event) => setSessionDescription(event.target.value)}
-                  placeholder="输入绘图描述..."
-                  className="min-h-[60px] max-h-[100px] w-full resize-none rounded-xl border border-border bg-surface px-4 py-2 text-sm text-text-primary outline-none transition-all placeholder:text-text-disabled focus:border-sakura focus:ring-2 focus:ring-sakura/30"
-                  aria-label="绘图描述输入框"
-                />
+            {/* 重做 */}
+            <button
+              onClick={() => addToast('info', '重做功能开发中')}
+              className="p-3 rounded-xl text-text-secondary hover:text-text-primary hover:bg-sakura-light/20 transition-all"
+              aria-label="重做"
+              title="重做"
+            >
+              <RotateCw className="w-5 h-5" />
+            </button>
 
-                {/* 绘图 Agent 按钮 */}
-                <div className="mt-3 flex justify-end">
-                  <button
-                    onClick={handleStartDrawing}
-                    disabled={!sessionDescription.trim() || isDrawing}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all ${
-                      sessionDescription.trim() && !isDrawing
-                        ? "bg-lavender hover:bg-lavender/90 text-white shadow-sm"
-                        : "bg-text-disabled text-white cursor-not-allowed"
-                    }`}
-                    aria-label="开始绘图"
-                  >
-                    <Sparkles className={`w-4 h-4 ${isDrawing ? "animate-spin" : ""}`} />
-                    {isDrawing ? "绘制中..." : "开始绘图"}
-                  </button>
-                </div>
-              </div>
-            </section>
-          </div>
+            <div className="w-full h-px bg-border my-1" />
 
-          {/* Voice Control Area - 缩小高度 */}
-          <div
-            ref={voiceAreaRef}
-            className="w-full max-w-3xl mt-4 mb-4"
-          >
-            {/* 语音输入组件 */}
-            <XfyunVoiceInput
-              onTranscriptChange={handleTranscriptChange}
-              onFinalResult={handleFinalResult}
-              transcript={transcript}
-            />
+            {/* 新建画布 */}
+            <button
+              onClick={handleNewCanvas}
+              className="p-3 rounded-xl text-text-secondary hover:text-lavender hover:bg-lavender-light/20 transition-all"
+              aria-label="新建画布"
+              title="新建画布"
+            >
+              <FilePlus className="w-5 h-5" />
+            </button>
+
+            {/* 清空画布 */}
+            <button
+              onClick={clearCanvas}
+              className="p-3 rounded-xl text-text-secondary hover:text-error hover:bg-error/10 transition-all"
+              aria-label="清空画布"
+              title="清空画布"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+
+            <div className="w-full h-px bg-border my-1" />
+
+            {/* 保存到图库 */}
+            <button
+              onClick={handleSaveClick}
+              className="p-3 rounded-xl text-text-secondary hover:text-mint hover:bg-mint-light/20 transition-all"
+              aria-label="保存到图库"
+              title="保存到图库"
+            >
+              <Save className="w-5 h-5" />
+            </button>
+
+            {/* 导出 PNG */}
+            <button
+              onClick={exportPNG}
+              className="p-3 rounded-xl text-text-secondary hover:text-macaron-blue hover:bg-macaron-blue-light/20 transition-all"
+              aria-label="导出 PNG"
+              title="导出 PNG"
+            >
+              <Download className="w-5 h-5" />
+            </button>
+
+            <div className="w-full h-px bg-border my-1" />
+
+            {/* 当前颜色指示 */}
+            <div className="flex flex-col items-center gap-1 p-2">
+              <div className="w-6 h-6 rounded-full bg-sakura border-2 border-white shadow-sm" />
+              <span className="text-xs text-text-secondary font-medium">樱花粉</span>
+            </div>
+
+            <div className="w-full h-px bg-border my-1" />
+
+            {/* 模式标签 */}
+            <div className="px-3 py-2 rounded-full bg-sakura-light text-sakura text-xs font-semibold text-center">
+              绘图模式
+            </div>
           </div>
         </div>
+
+        {/* Description Area - 缩小高度 */}
+        <div
+          ref={descriptionRef}
+          className="w-full max-w-3xl mt-4"
+        >
+          <section className="rounded-3xl border border-sakura/10 bg-white/90 shadow-sm shadow-sakura/5">
+            <div className="flex items-center gap-2 px-5 pt-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-lavender/20 text-lavender">
+                <Sparkles className="h-4 w-4" />
+              </div>
+              <h2 className="text-sm font-semibold text-text-primary">
+                绘图描述
+              </h2>
+            </div>
+
+            <div className="p-4 pt-2">
+              <textarea
+                value={sessionDescription}
+                onChange={(event) => setSessionDescription(event.target.value)}
+                placeholder="输入绘图描述..."
+                className="min-h-[60px] max-h-[100px] w-full resize-none rounded-xl border border-border bg-surface px-4 py-2 text-sm text-text-primary outline-none transition-all placeholder:text-text-disabled focus:border-sakura focus:ring-2 focus:ring-sakura/30"
+                aria-label="绘图描述输入框"
+              />
+
+              {/* 绘图 Agent 按钮 */}
+              <div className="mt-3 flex justify-end">
+                <button
+                  onClick={handleStartDrawing}
+                  disabled={!sessionDescription.trim() || isDrawing}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all ${
+                    sessionDescription.trim() && !isDrawing
+                      ? 'bg-lavender hover:bg-lavender/90 text-white shadow-sm'
+                      : 'bg-text-disabled text-white cursor-not-allowed'
+                  }`}
+                  aria-label="开始绘图"
+                >
+                  <Sparkles className={`w-4 h-4 ${isDrawing ? 'animate-spin' : ''}`} />
+                  {isDrawing ? '绘制中...' : '开始绘图'}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        {/* Voice Control Area - 缩小高度 */}
+        <div
+          ref={voiceAreaRef}
+          className="w-full max-w-3xl mt-4 mb-4"
+        >
+          {/* 语音输入组件 */}
+          <XfyunVoiceInput
+            onTranscriptChange={handleTranscriptChange}
+            onFinalResult={handleFinalResult}
+            transcript={transcript}
+          />
+        </div>
+      </div>
 
       {/* Save Modal */}
       <SaveModal
