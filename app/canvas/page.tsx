@@ -12,11 +12,13 @@ import {
   Sparkles,
   Download,
   Save,
+  FilePlus,
 } from "lucide-react";
 import gsap from "gsap";
 import type { MicButtonState } from "../components/MicButton";
 import Toast, { ToastType } from "../components/Toast";
 import XfyunVoiceInput from "../components/XfyunVoiceInput";
+import SaveModal from "../components/SaveModal";
 import { authDB, artworkDB, User as UserType } from "../lib/db";
 import type { DrawInstruction } from "../lib/draw-schema";
 
@@ -34,6 +36,10 @@ export default function CanvasPage() {
   const [sessionDescription, setSessionDescription] = useState("");
   const [toasts, setToasts] = useState<ToastData[]>([]);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveTitle, setSaveTitle] = useState("");
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [currentArtworkId, setCurrentArtworkId] = useState<string | null>(null);
 
   const headerRef = useRef<HTMLElement>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
@@ -256,8 +262,17 @@ export default function CanvasPage() {
     );
   }, []);
 
-  // 保存到图库
-  const saveToGallery = useCallback(async () => {
+  // 保存到图库（带命名）
+  const handleSaveClick = useCallback(() => {
+    // 设置默认标题为会话描述的前30个字符
+    const defaultTitle = sessionDescription.substring(0, 30) + 
+      (sessionDescription.length > 30 ? "..." : "") || "未命名作品";
+    setSaveTitle(defaultTitle);
+    setSaveModalOpen(true);
+  }, [sessionDescription]);
+
+  // 实际保存操作
+  const handleSaveConfirm = useCallback(async (title: string) => {
     const canvas = canvasRef.current;
     if (!canvas) {
       addToast("error", "无法获取画布内容");
@@ -273,18 +288,88 @@ export default function CanvasPage() {
         timestamp: Date.now(),
       });
 
-      await artworkDB.save({
-        userId: user?.id || "guest",
-        title: sessionDescription.substring(0, 30) + (sessionDescription.length > 30 ? "..." : "") || "未命名作品",
-        thumbnail,
-        canvasData,
-      });
-      addToast("success", "作品已保存到图库");
+      if (currentArtworkId) {
+        // 更新现有作品
+        await artworkDB.update(currentArtworkId, {
+          title,
+          thumbnail,
+          canvasData,
+        });
+        addToast("success", "作品已更新");
+      } else {
+        // 保存新作品
+        const artwork = await artworkDB.save({
+          userId: user?.id || "guest",
+          title,
+          thumbnail,
+          canvasData,
+        });
+        setCurrentArtworkId(artwork.id);
+        addToast("success", "作品已保存到图库");
+      }
+      setHasUnsavedChanges(false);
     } catch (error) {
       console.error("保存到图库失败:", error);
       addToast("error", "保存到图库失败");
     }
-  }, [canvasRef, sessionDescription, user, addToast]);
+  }, [canvasRef, sessionDescription, user, currentArtworkId, addToast]);
+
+  // 新建绘图（自动保存当前作品）
+  const handleNewCanvas = useCallback(async () => {
+    // 如果有未保存的更改，先自动保存
+    if (hasUnsavedChanges) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        try {
+          const thumbnail = canvas.toDataURL("image/png");
+          const canvasData = JSON.stringify({
+            width: canvas.width,
+            height: canvas.height,
+            description: sessionDescription,
+            timestamp: Date.now(),
+          });
+
+          const defaultTitle = sessionDescription.substring(0, 30) + 
+            (sessionDescription.length > 30 ? "..." : "") || "未命名作品";
+
+          if (currentArtworkId) {
+            await artworkDB.update(currentArtworkId, {
+              title: defaultTitle,
+              thumbnail,
+              canvasData,
+            });
+          } else {
+            await artworkDB.save({
+              userId: user?.id || "guest",
+              title: defaultTitle,
+              thumbnail,
+              canvasData,
+            });
+          }
+          addToast("info", "当前作品已自动保存");
+        } catch (error) {
+          console.error("自动保存失败:", error);
+        }
+      }
+    }
+
+    // 清空画布和状态
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    setSessionDescription("");
+    setTranscript("");
+    setCurrentArtworkId(null);
+    setHasUnsavedChanges(false);
+    addToast("success", "已创建新画布");
+  }, [hasUnsavedChanges, canvasRef, sessionDescription, currentArtworkId, user, addToast]);
 
   // 导出 PNG
   const exportPNG = useCallback(() => {
@@ -296,7 +381,8 @@ export default function CanvasPage() {
 
     try {
       const link = document.createElement("a");
-      link.download = `${sessionDescription.substring(0, 30) || "drawing"}_${Date.now()}.png`;
+      const title = sessionDescription.substring(0, 30) || "drawing";
+      link.download = `${title}.png`;
       link.href = canvas.toDataURL("image/png");
       link.click();
       addToast("success", "图片已导出");
@@ -305,6 +391,27 @@ export default function CanvasPage() {
       addToast("error", "导出失败");
     }
   }, [canvasRef, sessionDescription, addToast]);
+
+  // 清空画布
+  const clearCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    setHasUnsavedChanges(true);
+    addToast("success", "画布已清空");
+  }, [canvasRef, addToast]);
+
+  // 打开图库
+  const openGallery = useCallback(() => {
+    router.push("/gallery");
+  }, [router]);
 
   // 处理开始绘图
   const handleStartDrawing = useCallback(async () => {
@@ -329,17 +436,15 @@ export default function CanvasPage() {
 
       const instructions: DrawInstruction = await response.json();
       drawShapes(instructions);
-      addToast("success", "绘图完成");
-      
-      // 自动保存到图库
-      await saveToGallery();
+      setHasUnsavedChanges(true);
+      addToast("success", "绘图完成，记得保存作品");
     } catch (error) {
       console.error("Draw error:", error);
       addToast("error", "绘图失败，请重试");
     } finally {
       setIsDrawing(false);
     }
-  }, [sessionDescription, drawShapes, addToast, saveToGallery]);
+  }, [sessionDescription, drawShapes, addToast]);
 
   if (!user) {
     return (
@@ -378,7 +483,7 @@ export default function CanvasPage() {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={() => addToast("info", "图库功能开发中")}
+            onClick={openGallery}
             className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-text-secondary hover:text-text-primary hover:bg-sakura-light/20 transition-all"
             aria-label="打开图库"
           >
@@ -458,8 +563,18 @@ export default function CanvasPage() {
 
                 <div className="w-px h-6 bg-border" />
 
+                {/* 新建画布 */}
                 <button
-                  onClick={() => addToast("info", "清空功能开发中")}
+                  onClick={handleNewCanvas}
+                  className="p-2 rounded-xl text-text-secondary hover:text-lavender hover:bg-lavender-light/20 transition-all"
+                  aria-label="新建画布"
+                  title="新建画布"
+                >
+                  <FilePlus className="w-5 h-5" />
+                </button>
+
+                <button
+                  onClick={clearCanvas}
                   className="p-2 rounded-xl text-text-secondary hover:text-error hover:bg-error/10 transition-all"
                   aria-label="清空画布"
                   title="清空画布"
@@ -471,7 +586,7 @@ export default function CanvasPage() {
 
                 {/* 保存到图库 */}
                 <button
-                  onClick={saveToGallery}
+                  onClick={handleSaveClick}
                   className="p-2 rounded-xl text-text-secondary hover:text-mint hover:bg-mint-light/20 transition-all"
                   aria-label="保存到图库"
                   title="保存到图库"
@@ -600,6 +715,15 @@ export default function CanvasPage() {
           />
         </div>
       </div>
+
+      {/* Save Modal */}
+      <SaveModal
+        isOpen={saveModalOpen}
+        onClose={() => setSaveModalOpen(false)}
+        onSave={handleSaveConfirm}
+        title={saveTitle}
+        onTitleChange={setSaveTitle}
+      />
     </div>
   );
 }
