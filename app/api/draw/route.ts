@@ -6,9 +6,9 @@ export async function POST(req: Request) {
   try {
     const { prompt } = await req.json();
 
-    const apiBase = process.env.OPENAI_API_BASE || "https://api.openai.com/v1";
+    const apiBase = process.env.OPENAI_API_BASE || "https://api.deepseek.com/v1";
     const apiKey = process.env.OPENAI_API_KEY;
-    const modelName = process.env.OPENAI_API_MODEL || "gpt-4o-mini";
+    const modelName = process.env.OPENAI_API_MODEL || "deepseek-chat";
 
     if (!apiKey) {
       console.error("Missing OPENAI_API_KEY");
@@ -24,13 +24,15 @@ export async function POST(req: Request) {
 
     const result = await generateText({
       model,
-      temperature: 0.2,
-      prompt: `根据以下描述生成 Canvas 绘图指令。Canvas 尺寸为 800x600 像素。
+      temperature: 0.3,
+      prompt: `你是一个专业的Canvas绘图指令生成器。根据用户的自然语言描述，生成精确的Canvas绘图指令。
 
-用户描述: "${prompt}"
+Canvas尺寸：800x600像素
+坐标系：左上角为原点(0,0)，x轴向右延伸，y轴向下延伸
 
-请只返回一个 JSON 对象，不要返回 Markdown，不要使用代码块，不要添加任何解释文字。
-JSON 结构必须满足：
+用户描述："${prompt}"
+
+请生成JSON格式的绘图指令，结构如下：
 {
   "shapes": [
     {
@@ -51,16 +53,42 @@ JSON 结构必须满足：
   "backgroundColor": string?
 }
 
-请确保：
-- 坐标在 0-800 (x) 和 0-600 (y) 范围内
-- 使用合理的颜色值
-- 根据描述创建清晰的图形
-- 如果某个字段不需要，就不要输出该字段
-- 至少返回一个 shape`,
+绘图规则：
+1. 坐标必须在合理范围内：x: 0-800, y: 0-600
+2. 颜色使用标准格式：#RRGGBB 或颜色名称（如 red, blue, green）
+3. 根据描述合理设置图形大小和位置
+4. 如果用户指定了位置（如"左边"、"中间"、"右上角"），请对应到具体坐标：
+   - 左边：x约50-200
+   - 中间：x约300-500
+   - 右边：x约600-750
+   - 上方：y约50-200
+   - 中间：y约250-350
+   - 下方：y约400-550
+5. 如果用户指定了大小（如"大"、"小"），请对应到具体尺寸：
+   - 大：width/height约150-200
+   - 中：width/height约80-120
+   - 小：width/height约30-50
+6. 只返回JSON对象，不要包含任何解释文字或Markdown标记
+7. 确保JSON格式正确，可以被直接解析`,
     });
 
-    const normalizedText = result.text.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/, "");
-    const parsedJson = JSON.parse(normalizedText);
+    const normalizedText = result.text.trim()
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/, "");
+
+    let parsedJson;
+    try {
+      parsedJson = JSON.parse(normalizedText);
+    } catch (parseError) {
+      console.error("JSON parse error:", parseError);
+      console.error("Raw text:", result.text);
+      return Response.json(
+        { error: "Failed to parse drawing instructions" },
+        { status: 500 }
+      );
+    }
+
     const validated = drawInstructionSchema.parse(parsedJson);
 
     return Response.json(validated);
