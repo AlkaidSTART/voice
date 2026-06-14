@@ -169,23 +169,19 @@ export default function CanvasPage() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // 设置 Canvas 尺寸为容器大小
-    const container = canvas.parentElement;
-    if (container) {
-      const rect = container.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-    } else {
-      canvas.width = 800;
-      canvas.height = 600;
-    }
+    // 设置固定 Canvas 尺寸
+    const fixedWidth = 800;
+    const fixedHeight = 600;
+    canvas.width = fixedWidth;
+    canvas.height = fixedHeight;
 
     // 绘制背景
     if (instructions.backgroundColor) {
       ctx.fillStyle = instructions.backgroundColor;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     } else {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
     // 绘制每个图形
@@ -260,6 +256,25 @@ export default function CanvasPage() {
       { scale: 0.95, opacity: 0 },
       { scale: 1, opacity: 1, duration: 0.5, ease: "back.out(1.4)" }
     );
+  }, []);
+
+  // 初始化Canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // 设置固定尺寸
+    const fixedWidth = 800;
+    const fixedHeight = 600;
+    canvas.width = fixedWidth;
+    canvas.height = fixedHeight;
+
+    // 初始化白色背景
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
   }, []);
 
   // 保存到图库（带命名）
@@ -512,30 +527,31 @@ export default function CanvasPage() {
       </header>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col items-center justify-center overflow-auto p-4">
         {/* Canvas Area */}
-        <div className="flex-1 relative p-4">
+        <div
+          ref={canvasAreaRef}
+          className="relative bg-gradient-to-br from-white to-sakura-light/10 rounded-3xl border border-sakura/15 shadow-xl shadow-sakura/8 overflow-hidden"
+          style={{ width: '800px', height: '600px' }}
+        >
+          {/* 背景装饰网格 */}
           <div
-            ref={canvasAreaRef}
-            className="absolute inset-4 bg-gradient-to-br from-white to-sakura-light/10 rounded-3xl border border-sakura/15 shadow-xl shadow-sakura/8 overflow-hidden"
-          >
-            {/* 背景装饰网格 */}
-            <div
-              className="absolute inset-0 opacity-20"
-              style={{
-                backgroundImage:
-                  "radial-gradient(circle, #FFB7C5 0.5px, transparent 0.5px)",
-                backgroundSize: "32px 32px",
-              }}
-            />
+            className="absolute inset-0 opacity-20"
+            style={{
+              backgroundImage:
+                "radial-gradient(circle, #FFB7C5 0.5px, transparent 0.5px)",
+              backgroundSize: "32px 32px",
+            }}
+          />
 
-            {/* Canvas */}
-            <canvas
-              ref={canvasRef}
-              className="w-full h-full relative z-10 rounded-3xl"
-              role="img"
-              aria-label="绘图画布 - 通过语音指令控制绘图"
-            />
+          {/* Canvas */}
+          <canvas
+            ref={canvasRef}
+            className="absolute inset-0"
+            style={{ width: '100%', height: '100%' }}
+            role="img"
+            aria-label="绘图画布 - 通过语音指令控制绘图"
+          />
 
             {/* Toolbar */}
             <div
@@ -633,88 +649,64 @@ export default function CanvasPage() {
               </p>
             </div>
           </div>
-        </div>
 
-        <div
-          ref={descriptionRef}
-          className="px-4 pb-4 bg-surface/80 backdrop-blur-sm"
-        >
-          <section className="rounded-3xl border border-sakura/10 bg-white/90 shadow-sm shadow-sakura/5">
-            <div className="flex items-center gap-2 px-5 pt-4">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-lavender/20 text-lavender">
-                <Sparkles className="h-4 w-4" />
-              </div>
-              <div>
+          {/* Description Area - 缩小高度 */}
+          <div
+            ref={descriptionRef}
+            className="w-full max-w-3xl mt-4"
+          >
+            <section className="rounded-3xl border border-sakura/10 bg-white/90 shadow-sm shadow-sakura/5">
+              <div className="flex items-center gap-2 px-5 pt-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-lavender/20 text-lavender">
+                  <Sparkles className="h-4 w-4" />
+                </div>
                 <h2 className="text-sm font-semibold text-text-primary">
-                  会话描述
+                  绘图描述
                 </h2>
-                <p className="text-xs text-text-secondary">
-                  语音识别完成后会先填入这里，等待下一步处理
-                </p>
               </div>
-            </div>
 
-            <div className="p-4 pt-3">
-              <textarea
-                value={sessionDescription}
-                onChange={(event) => setSessionDescription(event.target.value)}
-                placeholder="识别结果会自动填入这里，你也可以继续补充或修改描述。"
-                className="min-h-28 w-full resize-none rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-text-primary outline-none transition-all placeholder:text-text-disabled focus:border-sakura focus:ring-2 focus:ring-sakura/30"
-                aria-label="会话描述输入框"
-              />
+              <div className="p-4 pt-2">
+                <textarea
+                  value={sessionDescription}
+                  onChange={(event) => setSessionDescription(event.target.value)}
+                  placeholder="输入绘图描述..."
+                  className="min-h-[60px] max-h-[100px] w-full resize-none rounded-xl border border-border bg-surface px-4 py-2 text-sm text-text-primary outline-none transition-all placeholder:text-text-disabled focus:border-sakura focus:ring-2 focus:ring-sakura/30"
+                  aria-label="绘图描述输入框"
+                />
 
-              {/* 绘图 Agent 按钮 */}
-              <div className="mt-3 flex justify-end">
-                <button
-                  onClick={handleStartDrawing}
-                  disabled={!sessionDescription.trim() || isDrawing}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all ${
-                    sessionDescription.trim() && !isDrawing
-                      ? "bg-lavender hover:bg-lavender/90 text-white shadow-sm"
-                      : "bg-text-disabled text-white cursor-not-allowed"
-                  }`}
-                  aria-label="开始绘图"
-                >
-                  <Sparkles className={`w-4 h-4 ${isDrawing ? "animate-spin" : ""}`} />
-                  {isDrawing ? "绘制中..." : "开始绘图"}
-                </button>
+                {/* 绘图 Agent 按钮 */}
+                <div className="mt-3 flex justify-end">
+                  <button
+                    onClick={handleStartDrawing}
+                    disabled={!sessionDescription.trim() || isDrawing}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all ${
+                      sessionDescription.trim() && !isDrawing
+                        ? "bg-lavender hover:bg-lavender/90 text-white shadow-sm"
+                        : "bg-text-disabled text-white cursor-not-allowed"
+                    }`}
+                    aria-label="开始绘图"
+                  >
+                    <Sparkles className={`w-4 h-4 ${isDrawing ? "animate-spin" : ""}`} />
+                    {isDrawing ? "绘制中..." : "开始绘图"}
+                  </button>
+                </div>
               </div>
-            </div>
-          </section>
-        </div>
-
-        {/* Voice Control Area */}
-        <div
-          ref={voiceAreaRef}
-          className="bg-surface/80 backdrop-blur-sm border-t border-sakura/10 p-4"
-        >
-          {/* 背景声波装饰 */}
-          <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            {[...Array(5)].map((_, i) => (
-              <div
-                key={i}
-                className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-sakura/10 to-transparent"
-                style={{
-                  bottom: `${20 + i * 15}%`,
-                  opacity: micState === "recording" ? 0.5 - i * 0.08 : 0,
-                  transition: "opacity 0.5s ease",
-                  animation:
-                    micState === "recording"
-                      ? `voiceBar 1s ease-in-out ${i * 0.15}s infinite alternate`
-                      : "none",
-                }}
-              />
-            ))}
+            </section>
           </div>
 
-          {/* 语音输入组件 */}
-          <XfyunVoiceInput
-            onTranscriptChange={handleTranscriptChange}
-            onFinalResult={handleFinalResult}
-            transcript={transcript}
-          />
+          {/* Voice Control Area - 缩小高度 */}
+          <div
+            ref={voiceAreaRef}
+            className="w-full max-w-3xl mt-4 mb-4"
+          >
+            {/* 语音输入组件 */}
+            <XfyunVoiceInput
+              onTranscriptChange={handleTranscriptChange}
+              onFinalResult={handleFinalResult}
+              transcript={transcript}
+            />
+          </div>
         </div>
-      </div>
 
       {/* Save Modal */}
       <SaveModal
