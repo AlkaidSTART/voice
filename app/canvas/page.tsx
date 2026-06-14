@@ -10,12 +10,14 @@ import {
   RotateCw,
   Trash2,
   Sparkles,
+  Download,
+  Save,
 } from "lucide-react";
 import gsap from "gsap";
 import type { MicButtonState } from "../components/MicButton";
 import Toast, { ToastType } from "../components/Toast";
 import XfyunVoiceInput from "../components/XfyunVoiceInput";
-import { authDB, User as UserType } from "../lib/db";
+import { authDB, artworkDB, User as UserType } from "../lib/db";
 import type { DrawInstruction } from "../lib/draw-schema";
 
 interface ToastData {
@@ -161,9 +163,16 @@ export default function CanvasPage() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // 设置 Canvas 尺寸
-    canvas.width = 800;
-    canvas.height = 600;
+    // 设置 Canvas 尺寸为容器大小
+    const container = canvas.parentElement;
+    if (container) {
+      const rect = container.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    } else {
+      canvas.width = 800;
+      canvas.height = 600;
+    }
 
     // 绘制背景
     if (instructions.backgroundColor) {
@@ -247,6 +256,56 @@ export default function CanvasPage() {
     );
   }, []);
 
+  // 保存到图库
+  const saveToGallery = useCallback(async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      addToast("error", "无法获取画布内容");
+      return;
+    }
+
+    try {
+      const thumbnail = canvas.toDataURL("image/png");
+      const canvasData = JSON.stringify({
+        width: canvas.width,
+        height: canvas.height,
+        description: sessionDescription,
+        timestamp: Date.now(),
+      });
+
+      await artworkDB.save({
+        userId: user?.id || "guest",
+        title: sessionDescription.substring(0, 30) + (sessionDescription.length > 30 ? "..." : "") || "未命名作品",
+        thumbnail,
+        canvasData,
+      });
+      addToast("success", "作品已保存到图库");
+    } catch (error) {
+      console.error("保存到图库失败:", error);
+      addToast("error", "保存到图库失败");
+    }
+  }, [canvasRef, sessionDescription, user, addToast]);
+
+  // 导出 PNG
+  const exportPNG = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      addToast("error", "无法获取画布内容");
+      return;
+    }
+
+    try {
+      const link = document.createElement("a");
+      link.download = `${sessionDescription.substring(0, 30) || "drawing"}_${Date.now()}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+      addToast("success", "图片已导出");
+    } catch (error) {
+      console.error("导出 PNG 失败:", error);
+      addToast("error", "导出失败");
+    }
+  }, [canvasRef, sessionDescription, addToast]);
+
   // 处理开始绘图
   const handleStartDrawing = useCallback(async () => {
     if (!sessionDescription.trim()) {
@@ -271,13 +330,16 @@ export default function CanvasPage() {
       const instructions: DrawInstruction = await response.json();
       drawShapes(instructions);
       addToast("success", "绘图完成");
+      
+      // 自动保存到图库
+      await saveToGallery();
     } catch (error) {
       console.error("Draw error:", error);
       addToast("error", "绘图失败，请重试");
     } finally {
       setIsDrawing(false);
     }
-  }, [sessionDescription, drawShapes, addToast]);
+  }, [sessionDescription, drawShapes, addToast, saveToGallery]);
 
   if (!user) {
     return (
@@ -350,22 +412,22 @@ export default function CanvasPage() {
         <div className="flex-1 relative p-4">
           <div
             ref={canvasAreaRef}
-            className="absolute inset-4 bg-white rounded-3xl border border-sakura/10 shadow-lg shadow-sakura/5 overflow-hidden"
+            className="absolute inset-4 bg-gradient-to-br from-white to-sakura-light/10 rounded-3xl border border-sakura/15 shadow-xl shadow-sakura/8 overflow-hidden"
           >
             {/* 背景装饰网格 */}
             <div
-              className="absolute inset-0 opacity-30"
+              className="absolute inset-0 opacity-20"
               style={{
                 backgroundImage:
                   "radial-gradient(circle, #FFB7C5 0.5px, transparent 0.5px)",
-                backgroundSize: "24px 24px",
+                backgroundSize: "32px 32px",
               }}
             />
 
             {/* Canvas */}
             <canvas
               ref={canvasRef}
-              className="w-full h-full relative z-10"
+              className="w-full h-full relative z-10 rounded-3xl"
               role="img"
               aria-label="绘图画布 - 通过语音指令控制绘图"
             />
@@ -403,6 +465,28 @@ export default function CanvasPage() {
                   title="清空画布"
                 >
                   <Trash2 className="w-5 h-5" />
+                </button>
+
+                <div className="w-px h-6 bg-border" />
+
+                {/* 保存到图库 */}
+                <button
+                  onClick={saveToGallery}
+                  className="p-2 rounded-xl text-text-secondary hover:text-mint hover:bg-mint-light/20 transition-all"
+                  aria-label="保存到图库"
+                  title="保存到图库"
+                >
+                  <Save className="w-5 h-5" />
+                </button>
+
+                {/* 导出 PNG */}
+                <button
+                  onClick={exportPNG}
+                  className="p-2 rounded-xl text-text-secondary hover:text-macaron-blue hover:bg-macaron-blue-light/20 transition-all"
+                  aria-label="导出 PNG"
+                  title="导出 PNG"
+                >
+                  <Download className="w-5 h-5" />
                 </button>
 
                 <div className="w-px h-6 bg-border" />

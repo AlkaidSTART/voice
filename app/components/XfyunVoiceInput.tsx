@@ -142,11 +142,16 @@ export default function XfyunVoiceInput({ onTranscriptChange, onFinalResult, tra
   }, []);
 
   const handleStart = useCallback(async () => {
+    // 立即清空上一次的内容，只显示当前识别结果
     setRuntimeError(null);
     setPartialResult("");
+    onTranscriptChange("");
     isStopRef.current = false;
     hasFinalizedRef.current = false;
     latestTextRef.current = "";
+
+    // 立即设置为正在听状态，显示动画反馈
+    setIsListening(true);
 
     try {
       console.log("正在请求麦克风权限...");
@@ -254,8 +259,6 @@ export default function XfyunVoiceInput({ onTranscriptChange, onFinalResult, tra
           },
         };
         ws.send(JSON.stringify(startPacket));
-        setPartialResult("");
-        setIsListening(true);
       };
 
       ws.onmessage = (event: MessageEvent) => {
