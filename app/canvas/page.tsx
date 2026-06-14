@@ -2,11 +2,18 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { User, Image, LogOut, RotateCcw, RotateCw, Trash2 } from "lucide-react";
+import {
+  User,
+  Image,
+  LogOut,
+  RotateCcw,
+  RotateCw,
+  Trash2,
+  Sparkles,
+} from "lucide-react";
 import gsap from "gsap";
-import MicButton, { MicButtonState } from "../components/MicButton";
+import type { MicButtonState } from "../components/MicButton";
 import Toast, { ToastType } from "../components/Toast";
-import TranscriptBar from "../components/TranscriptBar";
 import XfyunVoiceInput from "../components/XfyunVoiceInput";
 import { authDB, User as UserType } from "../lib/db";
 
@@ -21,14 +28,14 @@ export default function CanvasPage() {
   const [user, setUser] = useState<UserType | null>(null);
   const [micState, setMicState] = useState<MicButtonState>("idle");
   const [transcript, setTranscript] = useState("");
-  const [transcriptHistory, setTranscriptHistory] = useState<string[]>([]);
+  const [sessionDescription, setSessionDescription] = useState("");
   const [toasts, setToasts] = useState<ToastData[]>([]);
 
   const headerRef = useRef<HTMLElement>(null);
   const canvasAreaRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const voiceAreaRef = useRef<HTMLDivElement>(null);
-  const transcriptRef = useRef<HTMLDivElement>(null);
+  const descriptionRef = useRef<HTMLDivElement>(null);
 
   // 检查用户登录状态
   useEffect(() => {
@@ -67,7 +74,7 @@ export default function CanvasPage() {
         "-=0.3"
       )
       .fromTo(
-        transcriptRef.current,
+        descriptionRef.current,
         { y: 10, opacity: 0 },
         { y: 0, opacity: 1, duration: 0.3 },
         "-=0.2"
@@ -76,7 +83,7 @@ export default function CanvasPage() {
         voiceAreaRef.current,
         { y: 20, opacity: 0 },
         { y: 0, opacity: 1, duration: 0.4, ease: "back.out(1.5)" },
-        "-=0.2"
+        "-=0.15"
       );
 
     return () => {
@@ -137,16 +144,10 @@ export default function CanvasPage() {
     const trimmed = finalTranscript.trim();
     if (!trimmed) return;
 
-    setTranscriptHistory((prev) => {
-      if (prev.length > 0 && prev[prev.length - 1] === trimmed) {
-        return prev;
-      }
-      return [...prev, trimmed];
-    });
-
-    setTranscript("");
+    setTranscript(trimmed);
+    setSessionDescription(trimmed);
     setMicState("idle");
-    addToast("success", "语音识别完成");
+    addToast("success", "识别结果已填入会话描述");
   }, [addToast]);
 
   if (!user) {
@@ -305,13 +306,58 @@ export default function CanvasPage() {
           </div>
         </div>
 
-        {/* Transcript Bar */}
-        <div ref={transcriptRef}>
-          <TranscriptBar
-            transcript={transcript}
-            history={transcriptHistory}
-            isRecording={micState === "recording"}
-          />
+        <div
+          ref={descriptionRef}
+          className="px-4 pb-4 bg-surface/80 backdrop-blur-sm"
+        >
+          <section className="rounded-3xl border border-sakura/10 bg-white/90 shadow-sm shadow-sakura/5">
+            <div className="flex items-center gap-2 px-5 pt-4">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-lavender/20 text-lavender">
+                <Sparkles className="h-4 w-4" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-text-primary">
+                  会话描述
+                </h2>
+                <p className="text-xs text-text-secondary">
+                  语音识别完成后会先填入这里，等待下一步处理
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 pt-3">
+              <textarea
+                value={sessionDescription}
+                onChange={(event) => setSessionDescription(event.target.value)}
+                placeholder="识别结果会自动填入这里，你也可以继续补充或修改描述。"
+                className="min-h-28 w-full resize-none rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-text-primary outline-none transition-all placeholder:text-text-disabled focus:border-sakura focus:ring-2 focus:ring-sakura/30"
+                aria-label="会话描述输入框"
+              />
+
+              {/* 绘图 Agent 按钮 */}
+              <div className="mt-3 flex justify-end">
+                <button
+                  onClick={() => {
+                    if (sessionDescription.trim()) {
+                      addToast("info", "正在进入绘图 Agent...");
+                    } else {
+                      addToast("warning", "请先输入绘图描述");
+                    }
+                  }}
+                  disabled={!sessionDescription.trim()}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all ${
+                    sessionDescription.trim()
+                      ? "bg-lavender hover:bg-lavender/90 text-white shadow-sm"
+                      : "bg-text-disabled text-white cursor-not-allowed"
+                  }`}
+                  aria-label="进入绘图 Agent"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  开始绘图
+                </button>
+              </div>
+            </div>
+          </section>
         </div>
 
         {/* Voice Control Area */}
