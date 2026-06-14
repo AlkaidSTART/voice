@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { buildWsUrl } from "../lib/xfyun-signature";
+import { Mic, MicOff, AlertCircle, Send, X } from "lucide-react";
+import gsap from "gsap";
 
 interface VoiceInputProps {
   onTranscriptChange: (transcript: string) => void;
@@ -10,21 +11,20 @@ interface VoiceInputProps {
 
 /** 听写词结果 */
 interface XfyunCw {
-  w: string; // 词内容
+  w: string;
 }
 
 /** 听写句子结果 */
 interface XfyunWs {
-  bg: number; // 开始时间
-  ed: number; // 结束时间
-  cw?: XfyunCw[]; // 词列表
-  onebest?: string; // 最优结果（旧格式）
+  bg: number;
+  ed: number;
+  cw?: XfyunCw[];
+  onebest?: string;
 }
 
-/** base64解码后的文本结果 */
 interface XfyunDecodedResult {
-  ws?: XfyunWs[]; // 句子列表
-  ls?: number; // 是否最后一片结果
+  ws?: XfyunWs[];
+  ls?: number;
 }
 
 interface XfyunResult {
@@ -33,37 +33,24 @@ interface XfyunResult {
   message?: string;
   desc?: string;
   
-  /** 协议头部 */
   header?: {
-    /** 返回码 0表示会话调用成功，其它表示会话调用异常 */
     code: number;
-    /** 本次会话id */
     sid: string;
-    /** 数据状态 0:开始, 1:继续, 2:结束 */
     status: number;
-    /** 描述信息 */
     message?: string;
   };
   
-  /** 数据段，用于携带响应的数据 */
   payload?: {
     result?: {
-      /** 文本压缩格式 */
       compress?: string;
-      /** 文本编码 */
       encoding?: string;
-      /** 文本格式 */
       format?: string;
-      /** 数据序号 0-999999 */
       seq?: number;
-      /** 0:开始, 1:继续, 2:结束 */
       status?: number;
-      /** 听写数据文本 base64编码 */
       text?: string;
     };
   };
   
-  /** 兼容旧的响应格式 */
   data?: {
     result?: {
       ws?: XfyunWs[];
@@ -86,12 +73,6 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
   const audioContextRef = useRef<AudioContext | null>(null);
   const isStopRef = useRef(false);
 
-  const APP_ID = process.env.NEXT_PUBLIC_XFYUN_APP_ID || "";
-  const API_KEY = process.env.NEXT_PUBLIC_XFYUN_API_KEY || "";
-  const API_SECRET = process.env.NEXT_PUBLIC_XFYUN_API_SECRET || "";
-
-  const hasConfig = APP_ID && API_KEY && API_SECRET;
-
   const handleStop = useCallback(() => {
     setIsListening(false);
     isStopRef.current = true;
@@ -100,9 +81,9 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
       try {
         const endPacket = {
           header: {
-            app_id: APP_ID,
-            res_id: "hot_words", // 资源标识
-            status: 2, // 2:最后一帧
+            app_id: "",
+            res_id: "hot_words",
+            status: 2,
           },
           payload: {
             audio: {
@@ -110,9 +91,9 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
               sample_rate: 16000,
               channels: 1,
               bit_depth: 16,
-              seq: 591, // 数据序号
-              status: 2, // 2:结束
-              audio: "", // 结束帧音频数据为空
+              seq: 591,
+              status: 2,
+              audio: "",
             },
           },
         };
@@ -145,14 +126,9 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
       }
       audioContextRef.current = null;
     }
-  }, [APP_ID]);
+  }, []);
 
   const handleStart = useCallback(async () => {
-    if (!hasConfig) {
-      setRuntimeError("请配置讯飞语音识别参数");
-      return;
-    }
-    
     setRuntimeError(null);
     setPartialResult("");
     isStopRef.current = false;
@@ -162,10 +138,26 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       console.log("麦克风权限获取成功");
       
-      const url = await buildWsUrl({ appId: APP_ID, apiKey: API_KEY, apiSecret: API_SECRET });
-      console.log("WebSocket URL:", url);
+      // 调用后端API获取WebSocket URL
+      console.log("正在获取语音识别连接...");
+      const apiResponse = await fetch('/api/voice/transcribe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: 'getUrl' }),
+      });
       
-      const ws = new WebSocket(url);
+      const apiData = await apiResponse.json();
+      
+      if (!apiData.success || !apiData.wsUrl) {
+        throw new Error(apiData.error || '获取语音识别连接失败');
+      }
+      
+      const { wsUrl, appId } = apiData;
+      console.log("WebSocket URL:", wsUrl);
+      
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
       
       const audioContext = new AudioContext({ sampleRate: 16000 });
@@ -187,15 +179,13 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
             outputBuffer[i] = Math.max(-32768, Math.min(32767, inputBuffer[i] * 32768));
           }
           
-          // 将音频数据转换为 base64 编码
           const base64Audio = btoa(String.fromCharCode(...new Uint8Array(outputBuffer.buffer)));
           
-          // 构建音频数据包（中间帧）
           const audioPacket = {
             header: {
-              app_id: APP_ID,
-              res_id: "hot_words", // 资源标识
-              status: 1, // 1:中间帧
+              app_id: appId,
+              res_id: "hot_words",
+              status: 1,
             },
             payload: {
               audio: {
@@ -203,9 +193,9 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
                 sample_rate: 16000,
                 channels: 1,
                 bit_depth: 16,
-                seq: seq++, // 数据序号（从2开始）
-                status: 1, // 1:继续
-                audio: base64Audio, // base64 编码的音频数据
+                seq: seq++,
+                status: 1,
+                audio: base64Audio,
               },
             },
           };
@@ -218,33 +208,33 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
         console.log("WebSocket 连接成功");
         const startPacket = {
           header: {
-            app_id: APP_ID,
-            res_id: "hot_words", // 资源标识
-            status: 0, // 0:首帧
+            app_id: appId,
+            res_id: "hot_words",
+            status: 0,
           },
           parameter: {
             iat: {
-              domain: "slm", // 语音听写领域
-              language: "zh_cn", // 语种
-              accent: "mandarin", // 口音
-              eos: 6000, // 静音检测结束阈值（毫秒）
-              dwa: "wpgs", // 动态修正
+              domain: "slm",
+              language: "zh_cn",
+              accent: "mandarin",
+              eos: 6000,
+              dwa: "wpgs",
               result: {
-                encoding: "utf8", // 结果编码
-                compress: "raw", // 结果压缩
-                format: "json", // 结果格式
+                encoding: "utf8",
+                compress: "raw",
+                format: "json",
               },
             },
           },
           payload: {
             audio: {
-              encoding: "raw", // 音频编码格式
-              sample_rate: 16000, // 音频采样率
-              channels: 1, // 音频声道
-              bit_depth: 16, // 音频位深
-              seq: 1, // 数据序号
-              status: 0, // 0:开始
-              audio: "", // 首帧音频数据为空
+              encoding: "raw",
+              sample_rate: 16000,
+              channels: 1,
+              bit_depth: 16,
+              seq: 1,
+              status: 0,
+              audio: "",
             },
           },
         };
@@ -258,7 +248,6 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
         try {
           const result: XfyunResult = JSON.parse(event.data);
           
-          // 检查是否是错误响应
           const errorCode = result.code || result.header?.code;
           const errorDesc = result.desc || result.header?.message;
           
@@ -269,10 +258,8 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
             return;
           }
           
-          // 解析语音听写响应格式
           if (result.payload?.result?.text) {
             try {
-              // 解码 base64 编码的文本（UTF-8）
               const base64Text = result.payload.result.text;
               const binaryString = atob(base64Text);
               const bytes = new Uint8Array(binaryString.length);
@@ -282,10 +269,8 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
               const decodedText = new TextDecoder('utf-8').decode(bytes);
               console.log("解码后的文本:", decodedText);
               
-              // 解析为 JSON
               const decodedResult: XfyunDecodedResult = JSON.parse(decodedText);
               
-              // 提取听写结果
               if (decodedResult.ws && decodedResult.ws.length > 0) {
                 let frameText = "";
                 decodedResult.ws.forEach((item: XfyunWs) => {
@@ -298,10 +283,7 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
                   }
                 });
                 
-                // 动态修正模式下，每帧返回的是最新完整结果，直接使用
                 console.log("识别结果:", frameText);
-                
-                // 实时更新显示
                 setPartialResult(frameText);
                 onTranscriptChange(frameText);
               }
@@ -310,7 +292,6 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
             }
           }
           
-          // 检查是否是最后一帧（header.status === 2 表示结束）
           const headerStatus = result.header?.status;
           const resultStatus = result.payload?.result?.status;
           if (headerStatus === 2 || resultStatus === 2) {
@@ -318,7 +299,6 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
             handleStop();
           }
           
-          // 兼容旧的 result 格式
           if (result.action === "result" && result.data?.result?.ws) {
             const wsData = result.data.result.ws;
             if (wsData && wsData.length > 0) {
@@ -352,7 +332,7 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
         setRuntimeError(`无法启动语音识别: ${errorMsg}`);
       }
     }
-  }, [hasConfig, onTranscriptChange, handleStop, APP_ID]);
+  }, [handleStop, onTranscriptChange]);
 
   const startListening = useCallback(() => {
     handleStart();
@@ -374,51 +354,82 @@ export default function XfyunVoiceInput({ onTranscriptChange, transcript }: Voic
     }
   }, [manualInput, onTranscriptChange]);
 
-  // 渲染部分
   return (
-    <div className="voice-input-container">
+    <div className="w-full">
       {runtimeError && (
-        <div className="error-message">
-          {runtimeError}
+        <div className="mb-3 p-3 bg-error/10 border border-error/20 rounded-xl flex items-start gap-2">
+          <AlertCircle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-error">{runtimeError}</p>
         </div>
       )}
       
-      <div className="transcript-display">
-        {partialResult || transcript || "等待语音输入..."}
-      </div>
-      
-      <div className="manual-input-container">
-        <input
-          type="text"
-          value={manualInput}
-          onChange={(e) => setManualInput(e.target.value)}
-          onKeyPress={(e) => {
-            if (e.key === "Enter") {
-              handleManualSubmit();
-            }
-          }}
-          placeholder="手动输入绘图描述..."
-          className="manual-input"
-        />
-        <button onClick={handleManualSubmit} className="submit-button">
-          使用文本
+      <div className="flex items-center justify-center gap-3">
+        <button
+          onClick={isListening ? stopListening : startListening}
+          className={`relative w-16 h-16 rounded-full flex items-center justify-center transition-all shadow-lg ${
+            isListening
+              ? "bg-sakura text-white"
+              : "bg-macaron-blue hover:bg-macaron-blue/90 text-white"
+          }`}
+          aria-label={isListening ? "停止录音" : "开始录音"}
+          aria-pressed={isListening}
+        >
+          {isListening ? (
+            <MicOff className="w-7 h-7" />
+          ) : (
+            <Mic className="w-7 h-7" />
+          )}
+          
+          {/* 录音脉冲动画 */}
+          {isListening && (
+            <>
+              <span className="absolute inset-0 rounded-full bg-sakura/30 animate-ping" />
+              <span className="absolute inset-0 rounded-full bg-sakura/20 animate-ping" style={{ animationDelay: "0.5s" }} />
+            </>
+          )}
         </button>
-      </div>
-      
-      <div className="controls">
-        {!isListening ? (
-          <button onClick={startListening} className="start-button">
-            🎤 开始录音
-          </button>
-        ) : (
-          <button onClick={stopListening} className="stop-button">
-            ⏹️ 停止录音
-          </button>
-        )}
         
-        <button onClick={clearTranscript} className="clear-button">
-          🗑️ 清空
+        <button
+          onClick={clearTranscript}
+          className="p-3 rounded-xl text-text-secondary hover:text-text-primary hover:bg-sakura-light/20 transition-all"
+          aria-label="清空"
+        >
+          <X className="w-5 h-5" />
         </button>
+      </div>
+      
+      {isListening && (
+        <div className="mt-3 flex items-center justify-center gap-2 text-sakura">
+          <div className="w-2 h-2 bg-sakura rounded-full animate-pulse" />
+          <span className="text-sm">正在录音...</span>
+        </div>
+      )}
+      
+      {/* 备用手动输入 */}
+      <div className="mt-4 p-3 bg-macaron-blue-light/30 border border-macaron-blue/20 rounded-xl">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={manualInput}
+            onChange={(e) => setManualInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleManualSubmit()}
+            placeholder="或直接输入绘图描述..."
+            className="flex-1 px-4 py-2 border border-border rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-sakura focus:border-transparent transition-all"
+          />
+          <button
+            onClick={handleManualSubmit}
+            disabled={!manualInput.trim()}
+            className={`px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
+              manualInput.trim()
+                ? "bg-mint hover:bg-mint/90 text-white"
+                : "bg-text-disabled text-white cursor-not-allowed"
+            }`}
+            aria-label="使用文本"
+          >
+            <Send className="w-4 h-4" />
+            发送
+          </button>
+        </div>
       </div>
     </div>
   );

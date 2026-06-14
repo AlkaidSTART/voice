@@ -7,6 +7,7 @@ import gsap from "gsap";
 import MicButton, { MicButtonState } from "../components/MicButton";
 import Toast, { ToastType } from "../components/Toast";
 import TranscriptBar from "../components/TranscriptBar";
+import XfyunVoiceInput from "../components/XfyunVoiceInput";
 import { authDB, User as UserType } from "../lib/db";
 
 interface ToastData {
@@ -82,32 +83,6 @@ export default function CanvasPage() {
     };
   }, [user]);
 
-  // 模拟语音识别文本更新
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (micState === "recording") {
-      const phrases = [
-        "画",
-        "画一个",
-        "画一个圆形",
-        "画一个红色圆形",
-        "画一个红色圆形在",
-        "画一个红色圆形在中间",
-      ];
-      let i = 0;
-      interval = setInterval(() => {
-        if (i < phrases.length) {
-          setTranscript(phrases[i]);
-          i++;
-        }
-      }, 800);
-    } else if (micState === "idle") {
-      setTranscript("");
-    }
-
-    return () => clearInterval(interval);
-  }, [micState]);
-
   // 添加Toast通知
   const addToast = useCallback((type: ToastType, message: string) => {
     const id = `toast_${Date.now()}`;
@@ -119,7 +94,7 @@ export default function CanvasPage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // 处理麦克风按钮点击
+  // 处理麦克风按钮点击 - 切换录音状态
   const handleMicClick = useCallback(() => {
     switch (micState) {
       case "idle":
@@ -128,13 +103,7 @@ export default function CanvasPage() {
         break;
       case "recording":
         setMicState("processing");
-        setTranscript("识别中...");
-        // 模拟处理
-        setTimeout(() => {
-          setMicState("idle");
-          setTranscript("");
-          addToast("success", "语音识别完成");
-        }, 2000);
+        addToast("info", "识别中...");
         break;
       case "error":
         setMicState("idle");
@@ -150,6 +119,24 @@ export default function CanvasPage() {
     await authDB.logout();
     router.push("/login");
   }, [router]);
+
+  // 处理语音识别结果
+  const handleTranscriptChange = useCallback((newTranscript: string) => {
+    setTranscript(newTranscript);
+    if (newTranscript && micState === "processing") {
+      setTimeout(() => {
+        setMicState("idle");
+        addToast("success", "语音识别完成");
+      }, 500);
+    }
+  }, [micState, addToast]);
+
+  // 当转录内容变化时显示Toast
+  useEffect(() => {
+    if (transcript && micState === "idle") {
+      addToast("success", `已识别: ${transcript}`);
+    }
+  }, [transcript, micState, addToast]);
 
   if (!user) {
     return (
@@ -318,7 +305,7 @@ export default function CanvasPage() {
         {/* Voice Control Area */}
         <div
           ref={voiceAreaRef}
-          className="h-28 bg-surface/80 backdrop-blur-sm border-t border-sakura/10 flex items-center justify-center relative"
+          className="bg-surface/80 backdrop-blur-sm border-t border-sakura/10 p-4"
         >
           {/* 背景声波装饰 */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -339,7 +326,11 @@ export default function CanvasPage() {
             ))}
           </div>
 
-          <MicButton state={micState} onClick={handleMicClick} />
+          {/* 语音输入组件 */}
+          <XfyunVoiceInput
+            onTranscriptChange={handleTranscriptChange}
+            transcript={transcript}
+          />
         </div>
       </div>
     </div>
