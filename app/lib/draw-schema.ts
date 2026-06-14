@@ -17,7 +17,7 @@ export const drawInstructionSchema = z.object({
       strokeWidth: z.number().optional().describe("Stroke width"),
     })
   ),
-  backgroundColor: z.string().optional().describe("Canvas background color"),
+  backgroundColor: z.string().nullish().describe("Canvas background color"),
 });
 
 export type DrawInstruction = z.infer<typeof drawInstructionSchema>;

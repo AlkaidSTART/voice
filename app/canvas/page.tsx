@@ -41,8 +41,11 @@ export default function CanvasPage() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [micState, setMicState] = useState<'idle' | 'recording' | 'processing'>('idle');
   const [user, setUser] = useState<UserType | null>(null);
+  const [brushVisible, setBrushVisible] = useState(false);
+  const [brushPosition, setBrushPosition] = useState({ x: 0, y: 0 });
 
   const [toasts, setToasts] = useState<{ id: string; type: 'success' | 'error' | 'warning' | 'info'; message: string }[]>([]);
+  const toastIdCounter = useRef(0);
 
   // 加载用户信息
   useEffect(() => {
@@ -54,7 +57,7 @@ export default function CanvasPage() {
   }, []);
 
   const addToast = useCallback((type: 'success' | 'error' | 'warning' | 'info', message: string) => {
-    const id = Date.now().toString();
+    const id = `${Date.now()}-${toastIdCounter.current++}`;
     setToasts((prev) => [...prev, { id, type, message }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -82,8 +85,22 @@ export default function CanvasPage() {
     }
   }, [addToast]);
 
-  // 绘制图形到 Canvas
-  const drawShapes = useCallback((instructions: DrawInstruction) => {
+  // 移动画笔到指定位置
+  const moveBrush = useCallback((x: number, y: number, duration: number = 0.3) => {
+    return new Promise<void>((resolve) => {
+      setBrushVisible(true);
+      gsap.to(brushPosition, {
+        x,
+        y,
+        duration,
+        ease: 'power2.out',
+        onComplete: resolve,
+      });
+    });
+  }, [brushPosition]);
+
+  // 绘制图形到 Canvas（带画笔动画）
+  const drawShapes = useCallback(async (instructions: DrawInstruction) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -105,25 +122,99 @@ export default function CanvasPage() {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
-    // 绘制每个图形
-    instructions.shapes.forEach((shape) => {
+    // 绘制每个图形（带画笔动画）
+    for (const shape of instructions.shapes) {
       ctx.beginPath();
 
       switch (shape.type) {
-        case 'rectangle':
+        case 'rectangle': {
+          const w = shape.width || 100;
+          const h = shape.height || 100;
+          await moveBrush(shape.x, shape.y);
+          
+          // 绘制矩形轮廓动画
+          ctx.strokeStyle = shape.strokeColor || '#000';
+          ctx.lineWidth = shape.strokeWidth || 2;
+          
+          for (let i = 0; i <= 100; i += 5) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (instructions.backgroundColor) {
+              ctx.fillStyle = instructions.backgroundColor;
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+            
+            const progress = i / 100;
+            ctx.beginPath();
+            const currentW = w * progress;
+            const currentH = h * progress;
+            
+            ctx.moveTo(shape.x, shape.y);
+            ctx.lineTo(shape.x + currentW, shape.y);
+            ctx.lineTo(shape.x + currentW, shape.y + currentH);
+            ctx.lineTo(shape.x, shape.y + currentH);
+            ctx.closePath();
+            ctx.stroke();
+            
+            if (shape.fillColor && progress > 0.5) {
+              const fillProgress = (progress - 0.5) * 2;
+              ctx.fillStyle = shape.fillColor;
+              ctx.globalAlpha = fillProgress;
+              ctx.fill();
+              ctx.globalAlpha = 1;
+            }
+            
+            await new Promise(resolve => requestAnimationFrame(resolve));
+          }
+          
+          // 最终绘制
+          ctx.beginPath();
+          ctx.strokeStyle = shape.strokeColor || '#000';
+          ctx.lineWidth = shape.strokeWidth || 2;
+          ctx.strokeRect(shape.x, shape.y, w, h);
           if (shape.fillColor) {
             ctx.fillStyle = shape.fillColor;
-            ctx.fillRect(shape.x, shape.y, shape.width || 100, shape.height || 100);
+            ctx.fillRect(shape.x, shape.y, w, h);
           }
-          if (shape.strokeColor) {
-            ctx.strokeStyle = shape.strokeColor;
-            ctx.lineWidth = shape.strokeWidth || 2;
-            ctx.strokeRect(shape.x, shape.y, shape.width || 100, shape.height || 100);
-          }
+          await moveBrush(shape.x + w, shape.y + h, 0.2);
           break;
+        }
 
-        case 'circle':
-          ctx.arc(shape.x, shape.y, shape.radius || 50, 0, Math.PI * 2);
+        case 'circle': {
+          const r = shape.radius || 50;
+          await moveBrush(shape.x, shape.y - r);
+          
+          // 绘制圆形动画
+          ctx.strokeStyle = shape.strokeColor || '#000';
+          ctx.lineWidth = shape.strokeWidth || 2;
+          
+          for (let i = 0; i <= 100; i += 5) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (instructions.backgroundColor) {
+              ctx.fillStyle = instructions.backgroundColor;
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+            
+            const progress = i / 100;
+            ctx.beginPath();
+            ctx.arc(shape.x, shape.y, r, 0, Math.PI * 2 * progress);
+            ctx.stroke();
+            
+            if (shape.fillColor && progress > 0.5) {
+              const fillProgress = (progress - 0.5) * 2;
+              ctx.beginPath();
+              ctx.arc(shape.x, shape.y, r, 0, Math.PI * 2);
+              ctx.fillStyle = shape.fillColor;
+              ctx.globalAlpha = fillProgress;
+              ctx.fill();
+              ctx.globalAlpha = 1;
+            }
+            
+            await new Promise(resolve => requestAnimationFrame(resolve));
+          }
+          
+          // 最终绘制
+          ctx.beginPath();
+          ctx.arc(shape.x, shape.y, r, 0, Math.PI * 2);
           if (shape.fillColor) {
             ctx.fillStyle = shape.fillColor;
             ctx.fill();
@@ -133,21 +224,91 @@ export default function CanvasPage() {
             ctx.lineWidth = shape.strokeWidth || 2;
             ctx.stroke();
           }
+          await moveBrush(shape.x + r, shape.y, 0.2);
           break;
+        }
 
-        case 'line':
+        case 'line': {
+          const endX = shape.x2 || shape.x + 100;
+          const endY = shape.y2 || shape.y;
+          await moveBrush(shape.x, shape.y);
+          
+          // 绘制直线动画
+          ctx.strokeStyle = shape.strokeColor || '#000';
+          ctx.lineWidth = shape.strokeWidth || 2;
+          
+          for (let i = 0; i <= 100; i += 5) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (instructions.backgroundColor) {
+              ctx.fillStyle = instructions.backgroundColor;
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+            
+            const progress = i / 100;
+            const currentX = shape.x + (endX - shape.x) * progress;
+            const currentY = shape.y + (endY - shape.y) * progress;
+            
+            ctx.beginPath();
+            ctx.moveTo(shape.x, shape.y);
+            ctx.lineTo(currentX, currentY);
+            ctx.stroke();
+            
+            await new Promise(resolve => requestAnimationFrame(resolve));
+          }
+          
+          // 最终绘制
+          ctx.beginPath();
           ctx.moveTo(shape.x, shape.y);
-          ctx.lineTo(shape.x2 || shape.x + 100, shape.y2 || shape.y);
+          ctx.lineTo(endX, endY);
           ctx.strokeStyle = shape.strokeColor || '#000';
           ctx.lineWidth = shape.strokeWidth || 2;
           ctx.stroke();
+          await moveBrush(endX, endY, 0.2);
           break;
+        }
 
-        case 'triangle':
-          const baseX = shape.x;
-          const baseY = shape.y;
+        case 'triangle': {
           const triWidth = shape.width || 100;
           const triHeight = shape.height || 100;
+          const baseX = shape.x;
+          const baseY = shape.y;
+          await moveBrush(baseX, baseY);
+          
+          // 绘制三角形动画
+          ctx.strokeStyle = shape.strokeColor || '#000';
+          ctx.lineWidth = shape.strokeWidth || 2;
+          
+          for (let i = 0; i <= 100; i += 5) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (instructions.backgroundColor) {
+              ctx.fillStyle = instructions.backgroundColor;
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+            
+            const progress = i / 100;
+            const currentW = triWidth * progress;
+            const currentH = triHeight * progress;
+            
+            ctx.beginPath();
+            ctx.moveTo(baseX, baseY);
+            ctx.lineTo(baseX + currentW / 2, baseY - currentH);
+            ctx.lineTo(baseX + currentW, baseY);
+            ctx.closePath();
+            ctx.stroke();
+            
+            if (shape.fillColor && progress > 0.5) {
+              const fillProgress = (progress - 0.5) * 2;
+              ctx.fillStyle = shape.fillColor;
+              ctx.globalAlpha = fillProgress;
+              ctx.fill();
+              ctx.globalAlpha = 1;
+            }
+            
+            await new Promise(resolve => requestAnimationFrame(resolve));
+          }
+          
+          // 最终绘制
+          ctx.beginPath();
           ctx.moveTo(baseX, baseY);
           ctx.lineTo(baseX + triWidth / 2, baseY - triHeight);
           ctx.lineTo(baseX + triWidth, baseY);
@@ -161,23 +322,45 @@ export default function CanvasPage() {
             ctx.lineWidth = shape.strokeWidth || 2;
             ctx.stroke();
           }
+          await moveBrush(baseX + triWidth, baseY, 0.2);
           break;
+        }
 
-        case 'text':
+        case 'text': {
+          await moveBrush(shape.x, shape.y);
           ctx.font = '20px PingFang SC, Microsoft YaHei, sans-serif';
           ctx.fillStyle = shape.fillColor || '#000';
-          ctx.fillText(shape.text || '', shape.x, shape.y);
+          
+          // 文字逐字显示动画
+          const text = shape.text || '';
+          for (let i = 0; i <= text.length; i++) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (instructions.backgroundColor) {
+              ctx.fillStyle = instructions.backgroundColor;
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+            ctx.fillStyle = shape.fillColor || '#000';
+            ctx.fillText(text.substring(0, i), shape.x, shape.y);
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+          await moveBrush(shape.x + text.length * 12, shape.y, 0.2);
           break;
+        }
       }
-    });
+    }
+
+    // 绘制完成后隐藏画笔
+    setTimeout(() => {
+      setBrushVisible(false);
+    }, 500);
 
     // 添加绘制完成动画
     gsap.fromTo(
       canvas,
-      { scale: 0.95, opacity: 0 },
-      { scale: 1, opacity: 1, duration: 0.5, ease: 'back.out(1.4)' }
+      { scale: 0.98, opacity: 0.9 },
+      { scale: 1, opacity: 1, duration: 0.3, ease: 'back.out(1.4)' }
     );
-  }, []);
+  }, [moveBrush]);
 
   // 初始化Canvas
   useEffect(() => {
@@ -468,6 +651,68 @@ export default function CanvasPage() {
               role="img"
               aria-label="绘图画布 - 通过语音指令控制绘图"
             />
+
+            {/* 画笔指针 */}
+            <div
+              className={`absolute pointer-events-none transition-opacity duration-300 ${brushVisible ? 'opacity-100' : 'opacity-0'}`}
+              style={{
+                left: brushPosition.x,
+                top: brushPosition.y,
+                transform: 'translate(-50%, -50%)',
+                zIndex: 100,
+              }}
+            >
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                className="drop-shadow-lg"
+              >
+                {/* 画笔杆 */}
+                <rect
+                  x="10"
+                  y="8"
+                  width="4"
+                  height="12"
+                  rx="1"
+                  fill="#8B4513"
+                  stroke="#5D3A1A"
+                  strokeWidth="0.5"
+                />
+                {/* 画笔金属箍 */}
+                <rect
+                  x="9"
+                  y="5"
+                  width="6"
+                  height="4"
+                  rx="1"
+                  fill="#C0C0C0"
+                  stroke="#808080"
+                  strokeWidth="0.5"
+                />
+                {/* 画笔笔尖 */}
+                <path
+                  d="M10 2L12 0L14 2L12 24Z"
+                  fill="#FFB7C5"
+                  stroke="#FF6B8A"
+                  strokeWidth="0.5"
+                />
+                {/* 笔尖高光 */}
+                <path
+                  d="M11 2L12 0.5L12.5 2"
+                  fill="white"
+                  opacity="0.6"
+                />
+              </svg>
+              {/* 画笔光晕效果 */}
+              <div
+                className="absolute inset-0 -m-2 rounded-full animate-ping"
+                style={{
+                  background: 'radial-gradient(circle, rgba(255, 183, 197, 0.4) 0%, transparent 70%)',
+                }}
+              />
+            </div>
 
             {/* 右上角装饰 - 操作提示 */}
             <div className="absolute top-4 right-4 bg-white/80 backdrop-blur-sm rounded-xl border border-sakura/10 shadow-sm px-4 py-2">
