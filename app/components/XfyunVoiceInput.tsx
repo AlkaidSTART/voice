@@ -303,11 +303,19 @@ export default function XfyunVoiceInput({ onTranscriptChange, onFinalResult, tra
                   }
                 });
                 
-                console.log("识别结果:", frameText);
-                currentFrameText = frameText;
-                latestTextRef.current = frameText;
-                setPartialResult(frameText);
-                onTranscriptChange(frameText);
+                console.log("当前帧识别结果:", frameText);
+                
+                // 如果当前帧是句号且之前已有结果，不覆盖，只累积
+                if (frameText === "。" && latestTextRef.current.trim()) {
+                  currentFrameText = latestTextRef.current + frameText;
+                  latestTextRef.current = currentFrameText;
+                } else {
+                  currentFrameText = frameText;
+                  latestTextRef.current = frameText;
+                }
+                
+                setPartialResult(latestTextRef.current);
+                onTranscriptChange(latestTextRef.current);
               }
             } catch (decodeError) {
               console.error("解码讯飞响应失败:", decodeError);
